@@ -1,14 +1,13 @@
 name: PineTS Runtime Trusted Packaging
 
 on:
-  pull_request_target:
-    branches:
-      - main
-    types: [opened, synchronize, reopened]
+  issues:
+    types: [opened]
   workflow_dispatch:
 
 jobs:
   package-pinets:
+    if: github.event_name == 'workflow_dispatch' || github.event.issue.title == 'Temporary PineTS runtime packaging trigger'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
