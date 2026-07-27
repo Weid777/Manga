@@ -1,61 +1,56 @@
-name: PineTS Runtime Trusted Packaging
+name: PineTS Runtime 0.9.29
 
 on:
-  issues:
-    types: [opened]
   workflow_dispatch:
 
 jobs:
   package-pinets:
-    if: github.event_name == 'workflow_dispatch' || github.event.issue.title == 'Temporary PineTS runtime packaging trigger'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
       contents: write
     steps:
-      - name: Checkout trusted base branch only
+      - name: Checkout main
         uses: actions/checkout@v4
         with:
           ref: main
 
-      - name: Package fixed PineTS runtime and preserve diagnostics
+      - name: Package and verify PineTS 0.9.29
         shell: bash
+        env:
+          RUN_ID: ${{ github.run_id }}
         run: |
-          set -u
+          set -euo pipefail
           OUT=/tmp/pinets-runtime-artifact
           rm -rf "$OUT"
           mkdir -p "$OUT"
+          printf '%s\n' "$RUN_ID" > "$OUT/GITHUB_RUN_ID.txt"
           date -u +%FT%TZ > "$OUT/RUNNER_STARTED_UTC.txt"
-          node --version > "$OUT/NODE_VERSION.txt" 2>&1 || true
-          npm --version > "$OUT/NPM_VERSION.txt" 2>&1 || true
-
-          set +e
+          node --version > "$OUT/NODE_VERSION.txt"
+          npm --version > "$OUT/NPM_VERSION.txt"
           npm pack pinets@0.9.29 --pack-destination "$OUT" > "$OUT/NPM_PACK_STDOUT.txt" 2> "$OUT/NPM_PACK_STDERR.txt"
-          STATUS=$?
-          set -e
-          echo "$STATUS" > "$OUT/NPM_PACK_EXIT_CODE.txt"
-
-          if [ "$STATUS" -eq 0 ]; then
-            TGZ=$(find "$OUT" -maxdepth 1 -name 'pinets-*.tgz' | head -n 1)
-            mkdir -p "$OUT/extracted"
-            tar -xzf "$TGZ" -C "$OUT/extracted"
-            cp "$OUT/extracted/package/dist/pinets.min.cjs" "$OUT/pinets.min.cjs"
-            cp "$OUT/extracted/package/package.json" "$OUT/pinets-package.json"
-            node -e "const p=require('$OUT/extracted/package/package.json'); if(p.version!=='0.9.29') throw new Error('Unexpected version '+p.version); console.log(p.version)" > "$OUT/PINETS_VERSION.txt"
-            sha256sum "$OUT/pinets.min.cjs" > "$OUT/PINETS_SHA256.txt"
-          fi
+          TGZ=$(find "$OUT" -maxdepth 1 -name 'pinets-*.tgz' | head -n 1)
+          mkdir -p "$OUT/extracted"
+          tar -xzf "$TGZ" -C "$OUT/extracted"
+          cp "$OUT/extracted/package/dist/pinets.min.cjs" "$OUT/pinets.min.cjs"
+          cp "$OUT/extracted/package/package.json" "$OUT/pinets-package.json"
+          node -e "const p=require('$OUT/extracted/package/package.json'); if(p.version!=='0.9.29') throw new Error('Unexpected version '+p.version); console.log(p.version)" > "$OUT/PINETS_VERSION.txt"
+          sha256sum "$OUT/pinets.min.cjs" > "$OUT/PINETS_SHA256.txt"
 
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git checkout --orphan pinets-runtime-artifact
           git rm -rf . >/dev/null 2>&1 || true
           mkdir -p runtime
-          cp -a "$OUT"/. runtime/
+          cp "$OUT/GITHUB_RUN_ID.txt" runtime/
+          cp "$OUT/PINETS_VERSION.txt" runtime/
+          cp "$OUT/PINETS_SHA256.txt" runtime/
+          cp "$OUT/RUNNER_STARTED_UTC.txt" runtime/
           git add runtime
-          git commit -m "PineTS 0.9.29 runtime artifact and diagnostics"
+          git commit -m "PineTS 0.9.29 runtime manifest for run $RUN_ID"
           git push --force origin HEAD:pinets-runtime-artifact
 
-      - name: Upload artifact backup
+      - name: Upload verified runtime
         uses: actions/upload-artifact@v4
         with:
           name: pinets-0.9.29-runtime
