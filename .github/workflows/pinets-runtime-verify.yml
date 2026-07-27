@@ -1,9 +1,10 @@
-name: PineTS Runtime Self Evidence
+name: PineTS Runtime Trusted Packaging
 
 on:
-  push:
+  pull_request_target:
     branches:
       - main
+    types: [opened, synchronize, reopened]
   workflow_dispatch:
 
 jobs:
@@ -13,8 +14,10 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: Checkout
+      - name: Checkout trusted base branch only
         uses: actions/checkout@v4
+        with:
+          ref: main
 
       - name: Package fixed PineTS runtime and preserve diagnostics
         shell: bash
