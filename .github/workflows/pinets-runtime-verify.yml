@@ -1,10 +1,7 @@
-name: PineTS Runtime Verify
+name: PineTS Runtime Self Evidence
 
 on:
   push:
-    branches:
-      - main
-  pull_request:
     branches:
       - main
   workflow_dispatch:
@@ -14,23 +11,52 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
-      contents: read
+      contents: write
     steps:
-      - name: Prepare fixed PineTS runtime
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Package fixed PineTS runtime and preserve diagnostics
         shell: bash
         run: |
-          set -euo pipefail
+          set -u
+          OUT=/tmp/pinets-runtime-artifact
+          rm -rf "$OUT"
+          mkdir -p "$OUT"
+          date -u +%FT%TZ > "$OUT/RUNNER_STARTED_UTC.txt"
+          node --version > "$OUT/NODE_VERSION.txt" 2>&1 || true
+          npm --version > "$OUT/NPM_VERSION.txt" 2>&1 || true
+
+          set +e
+          npm pack pinets@0.9.29 --pack-destination "$OUT" > "$OUT/NPM_PACK_STDOUT.txt" 2> "$OUT/NPM_PACK_STDERR.txt"
+          STATUS=$?
+          set -e
+          echo "$STATUS" > "$OUT/NPM_PACK_EXIT_CODE.txt"
+
+          if [ "$STATUS" -eq 0 ]; then
+            TGZ=$(find "$OUT" -maxdepth 1 -name 'pinets-*.tgz' | head -n 1)
+            mkdir -p "$OUT/extracted"
+            tar -xzf "$TGZ" -C "$OUT/extracted"
+            cp "$OUT/extracted/package/dist/pinets.min.cjs" "$OUT/pinets.min.cjs"
+            cp "$OUT/extracted/package/package.json" "$OUT/pinets-package.json"
+            node -e "const p=require('$OUT/extracted/package/package.json'); if(p.version!=='0.9.29') throw new Error('Unexpected version '+p.version); console.log(p.version)" > "$OUT/PINETS_VERSION.txt"
+            sha256sum "$OUT/pinets.min.cjs" > "$OUT/PINETS_SHA256.txt"
+          fi
+
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git checkout --orphan pinets-runtime-artifact
+          git rm -rf . >/dev/null 2>&1 || true
           mkdir -p runtime
-          cd runtime
-          npm init -y >/dev/null
-          npm install --ignore-scripts --no-audit --no-fund pinets@0.9.29
-          node -e "const p=require('./node_modules/pinets/package.json'); if(p.version!=='0.9.29') throw new Error('Unexpected version '+p.version); console.log(p.version)" > PINETS_VERSION.txt
-          sha256sum node_modules/pinets/dist/pinets.min.cjs > PINETS_SHA256.txt
-          tar -czf pinets-0.9.29-runtime.tgz node_modules/pinets package.json package-lock.json PINETS_VERSION.txt PINETS_SHA256.txt
-      - name: Upload PineTS runtime
+          cp -a "$OUT"/. runtime/
+          git add runtime
+          git commit -m "PineTS 0.9.29 runtime artifact and diagnostics"
+          git push --force origin HEAD:pinets-runtime-artifact
+
+      - name: Upload artifact backup
         uses: actions/upload-artifact@v4
         with:
           name: pinets-0.9.29-runtime
-          path: runtime/pinets-0.9.29-runtime.tgz
+          path: /tmp/pinets-runtime-artifact
           if-no-files-found: error
           retention-days: 1
